@@ -1,46 +1,65 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { getCurrentUser, signIn, signUp, signOut, onAuthStateChanged } from '../services/firebaseAuth';
+import {
+  getCurrentUser,
+  signIn,
+  signUp,
+  signOut,
+  onAuthStateChanged,
+  getIdToken,
+  getIdTokenAsync,
+  getFirebaseConfig,
+} from '../services/firebaseAuth';
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(getCurrentUser);
+  const [currentUser, setCurrentUser] = useState(getCurrentUser);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged((currentUser) => {
-      setUser(currentUser);
+    const unsubscribe = onAuthStateChanged((firebaseUser) => {
+      setCurrentUser(firebaseUser);
       setLoading(false);
     });
-    return unsubscribe;
+    return () => {
+      if (typeof unsubscribe === 'function') {
+        unsubscribe();
+      }
+    };
   }, []);
 
   const handleLogin = async (email, password) => {
     const loggedInUser = await signIn(email, password);
-    setUser(loggedInUser);
+    setCurrentUser(loggedInUser);
     return loggedInUser;
   };
 
   const handleSignup = async (name, email, password) => {
     const newUser = await signUp(name, email, password);
-    setUser(newUser);
+    setCurrentUser(newUser);
     return newUser;
   };
 
-  const handleLogout = () => {
-    signOut();
-    setUser(null);
+  const handleLogout = async () => {
+    await signOut();
+    setCurrentUser(null);
   };
+
+  const configStatus = getFirebaseConfig();
 
   return (
     <AuthContext.Provider
       value={{
-        user,
+        currentUser,
+        user: currentUser, // backwards compatibility
         loading,
         login: handleLogin,
         signup: handleSignup,
         logout: handleLogout,
-        isAuthenticated: !!user,
+        isAuthenticated: !!currentUser,
+        getIdToken,
+        getIdTokenAsync,
+        configStatus,
       }}
     >
       {children}

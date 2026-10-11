@@ -1,8 +1,9 @@
 import React from 'react';
 import { useAuth } from '../context/AuthContext';
 
-export default function Navbar({ backendStatus, onRefreshStatus, onNavigateToLogin }) {
-  const { user, logout, isAuthenticated } = useAuth();
+export default function Navbar({ backendStatus, onRefreshStatus, onNavigateToLogin, onNavigateToAccount }) {
+  const { user, currentUser, logout, isAuthenticated } = useAuth();
+  const activeUser = currentUser || user;
 
   const getStatusBadge = () => {
     if (backendStatus.status === 'healthy') {
@@ -80,17 +81,25 @@ export default function Navbar({ backendStatus, onRefreshStatus, onNavigateToLog
         {getStatusBadge()}
 
         {isAuthenticated ? (
-          <div className="user-profile-menu">
-            <div className="user-avatar" title={user?.email || 'User Profile'}>
-              <span>{getInitials(user?.displayName, user?.email)}</span>
+          <div
+            className="user-profile-menu"
+            onClick={() => onNavigateToAccount && onNavigateToAccount()}
+            title="Click to view Account & Security Profile"
+            style={{ cursor: 'pointer' }}
+          >
+            <div className="user-avatar" title={activeUser?.email || 'User Profile'}>
+              <span>{getInitials(activeUser?.displayName, activeUser?.email)}</span>
             </div>
             <div className="user-meta">
-              <span className="user-name">{user?.displayName || 'Lead Auditor'}</span>
-              <span className="user-role">{user?.email || 'Authenticated'}</span>
+              <span className="user-name">{activeUser?.displayName || 'Lead Auditor'}</span>
+              <span className="user-role">{activeUser?.email || 'Authenticated'}</span>
             </div>
             <button
               className="navbar-logout-btn"
-              onClick={logout}
+              onClick={(e) => {
+                e.stopPropagation();
+                logout();
+              }}
               title="Sign Out of InsightDeck"
             >
               Sign Out

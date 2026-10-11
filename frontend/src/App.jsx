@@ -10,26 +10,31 @@ import ReportsPage from './pages/ReportsPage';
 import PresentationEditor from './pages/PresentationEditor';
 import LoginPage from './pages/LoginPage';
 import SignupPage from './pages/SignupPage';
+import AccountPage from './pages/AccountPage';
 import { checkHealth } from './services/api';
 import './App.css';
 
 const getTabFromPath = () => {
-  const p = window.location.pathname.replace(/^\/+/, '').toLowerCase();
+  let p = window.location.pathname.replace(/^\/+/, '').toLowerCase();
+  if (p.startsWith('insightdeck')) {
+    p = p.replace(/^insightdeck\/?/, '');
+  }
   if (p === 'presentation') return 'presentation';
   if (p === 'upload') return 'upload';
   if (p === 'analysis') return 'analysis';
   if (p === 'ask-data') return 'ask-data';
   if (p === 'reports') return 'reports';
+  if (p === 'account') return 'account';
   if (p === 'login') return 'login';
   if (p === 'signup') return 'signup';
   return 'dashboard';
 };
 
 /** Protected tabs that require authentication */
-const PROTECTED_TABS = ['dashboard', 'upload', 'analysis', 'ask-data', 'reports', 'presentation'];
+const PROTECTED_TABS = ['dashboard', 'upload', 'analysis', 'ask-data', 'reports', 'presentation', 'account'];
 
 function AppContent() {
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, loading, currentUser } = useAuth();
   const [activeTab, setActiveTab] = useState(getTabFromPath);
   const [uploadedDataset, setUploadedDataset] = useState(() => {
     try {
@@ -45,7 +50,9 @@ function AppContent() {
   // Sync tab with browser URL history
   const navigateTo = useCallback((tab) => {
     setActiveTab(tab);
-    const targetPath = tab === 'dashboard' ? '/' : `/${tab}`;
+    const isPages = window.location.pathname.toLowerCase().startsWith('/insightdeck');
+    const prefix = isPages ? '/InsightDeck' : '';
+    const targetPath = tab === 'dashboard' ? (prefix || '/') : `${prefix}/${tab}`;
     if (window.location.pathname !== targetPath) {
       window.history.pushState({ tab }, '', targetPath);
     }
@@ -105,7 +112,7 @@ function AppContent() {
   }
 
   // Auth pages (login / signup) — rendered without sidebar/navbar
-  if (!isAuthenticated) {
+  if (!isAuthenticated || !currentUser) {
     if (activeTab === 'signup') {
       return (
         <SignupPage
@@ -159,6 +166,8 @@ function AppContent() {
             onNavigateToUpload={() => navigateTo('upload')}
           />
         );
+      case 'account':
+        return <AccountPage onNavigateToDashboard={() => navigateTo('dashboard')} />;
       default:
         return <Dashboard dataset={uploadedDataset} onNavigateToUpload={() => navigateTo('upload')} />;
     }
@@ -170,6 +179,7 @@ function AppContent() {
         backendStatus={backendStatus}
         onRefreshStatus={verifyBackend}
         onNavigateToLogin={() => navigateTo('login')}
+        onNavigateToAccount={() => navigateTo('account')}
       />
       <div className="app-main-layout">
         <Sidebar

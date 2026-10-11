@@ -21,12 +21,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from analyzer import analyze_dataset
-from auth_helper import get_authenticated_user_id
-from chatbot import process_chat_message
-from excel_processor import process_excel_file
-from insights import generate_factual_insights
-from presentation import (
+from .analyzer import analyze_dataset
+from .auth_helper import get_authenticated_user_id
+from .chatbot import process_chat_message
+from .excel_processor import process_excel_file
+from .insights import generate_factual_insights
+from .presentation import (
     build_presentation_model,
     generate_presentation_from_model,
 )
@@ -55,6 +55,7 @@ origins = [
     "http://127.0.0.1:5173",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "https://gauri196.github.io",
 ]
 
 app.add_middleware(

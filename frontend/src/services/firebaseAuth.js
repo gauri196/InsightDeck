@@ -1,6 +1,15 @@
 /**
- * Firebase Authentication Service for InsightDeck.
- * Uses official Firebase Authentication REST API:
+ * Firebase Authentication Module for InsightDeck.
+ * Uses official Firebase Modular SDK (v11+):
+ * - initializeApp()
+ * - getAuth()
+ * - createUserWithEmailAndPassword()
+ * - signInWithEmailAndPassword()
+ * - onAuthStateChanged()
+ * - signOut()
+ * - updateProfile()
+ *
+ * Reads strictly from Vite environment variables:
  * - VITE_FIREBASE_API_KEY
  * - VITE_FIREBASE_AUTH_DOMAIN
  * - VITE_FIREBASE_PROJECT_ID
@@ -9,179 +18,252 @@
  * - VITE_FIREBASE_APP_ID
  */
 
-const STORAGE_USER_KEY = 'insightdeck_auth_user';
-const STORAGE_TOKEN_KEY = 'insightdeck_auth_token';
-
-// Read Firebase config from environment variables
-export const FIREBASE_CONFIG = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || '',
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || '',
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || '',
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || '',
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || '',
-};
-
-const listeners = new Set();
-
-function notifyListeners(user) {
-  listeners.forEach((cb) => {
-    try {
-      cb(user);
-    } catch (e) {
-      console.error('Auth state listener error:', e);
-    }
-  });
-}
-
-function checkFirebaseConfig() {
-  if (!FIREBASE_CONFIG.apiKey || FIREBASE_CONFIG.apiKey === 'YOUR_API_KEY') {
-    throw new Error(
-      'Firebase Authentication is not configured. Please set VITE_FIREBASE_API_KEY in your frontend environment variables (.env).'
-    );
-  }
-}
+import { initializeApp, getApps, getApp } from 'firebase/app';
+import {
+  getAuth,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut as fbSignOut,
+  onAuthStateChanged as fbOnAuthStateChanged,
+  updateProfile,
+} from 'firebase/auth';
 
 /**
- * Gets currently logged in user session from localStorage.
+ * Validates and retrieves Firebase configuration from Vite environment variables.
+ * Never logs raw secrets or tokens.
  */
-export function getCurrentUser() {
-  try {
-    const raw = localStorage.getItem(STORAGE_USER_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
+export function getFirebaseConfig() {
+  const apiKey = import.meta.env.VITE_FIREBASE_API_KEY || '';
+  const authDomain = import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || '';
+  const projectId = import.meta.env.VITE_FIREBASE_PROJECT_ID || '';
+  const storageBucket = import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || '';
+  const messagingSenderId = import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '';
+  const appId = import.meta.env.VITE_FIREBASE_APP_ID || '';
+
+  const missingKeys = [];
+  if (!apiKey || apiKey === 'YOUR_API_KEY') missingKeys.push('VITE_FIREBASE_API_KEY');
+  if (!authDomain) missingKeys.push('VITE_FIREBASE_AUTH_DOMAIN');
+  if (!projectId) missingKeys.push('VITE_FIREBASE_PROJECT_ID');
+  if (!storageBucket) missingKeys.push('VITE_FIREBASE_STORAGE_BUCKET');
+  if (!messagingSenderId) missingKeys.push('VITE_FIREBASE_MESSAGING_SENDER_ID');
+  if (!appId) missingKeys.push('VITE_FIREBASE_APP_ID');
+
+  const isConfigured = missingKeys.length === 0;
+
+  return {
+    apiKey,
+    authDomain,
+    projectId,
+    storageBucket,
+    messagingSenderId,
+    appId,
+    missingKeys,
+    isConfigured,
+  };
+}
+
+const config = getFirebaseConfig();
+
+let app = null;
+let auth = null;
+
+try {
+  if (getApps().length > 0) {
+    app = getApp();
+    auth = getAuth(app);
+  } else if (config.apiKey && config.projectId) {
+    app = initializeApp({
+      apiKey: config.apiKey,
+      authDomain: config.authDomain,
+      projectId: config.projectId,
+      storageBucket: config.storageBucket,
+      messagingSenderId: config.messagingSenderId,
+      appId: config.appId,
+    });
+    auth = getAuth(app);
   }
+} catch (initErr) {
+  console.error('[InsightDeck Firebase] Initialization error:', initErr.message);
 }
 
+// In-memory cached token to provide synchronous getIdToken() for api.js
+let cachedIdToken = '';
+
 /**
- * Gets the current Firebase ID token.
+ * Formats Firebase errors into user-friendly and actionable messages.
  */
-export function getIdToken() {
-  return localStorage.getItem(STORAGE_TOKEN_KEY) || '';
+export function formatFirebaseError(error) {
+  if (!error) return 'An unexpected error occurred.';
+  const code = error.code || '';
+  const msg = error.message || '';
+
+  if (code === 'auth/configuration-not-found' || msg.includes('configuration-not-found')) {
+    return 'Firebase Email/Password provider is not enabled. In Firebase Console → Authentication → Sign-in method, click "Email/Password" and enable it.';
+  }
+  if (code === 'auth/email-already-in-use') {
+    return 'An account with this email address already exists. Please sign in instead.';
+  }
+  if (
+    code === 'auth/invalid-credential' ||
+    code === 'auth/user-not-found' ||
+    code === 'auth/wrong-password' ||
+    msg.includes('INVALID_LOGIN_CREDENTIALS')
+  ) {
+    return 'Invalid email address or password. Please verify your credentials.';
+  }
+  if (code === 'auth/invalid-email') {
+    return 'Please enter a valid email address.';
+  }
+  if (code === 'auth/weak-password') {
+    return 'Password is too weak. Please use at least 6 characters.';
+  }
+  if (code === 'auth/user-disabled') {
+    return 'This account has been disabled. Please contact support.';
+  }
+  if (code === 'auth/too-many-requests') {
+    return 'Too many unsuccessful attempts. Access temporarily restricted. Try again later.';
+  }
+  if (code === 'auth/network-request-failed') {
+    return 'Network connection failed. Please check your internet connection.';
+  }
+  if (code === 'auth/api-key-not-valid') {
+    return 'Firebase API key is invalid. Please check VITE_FIREBASE_API_KEY in frontend/.env.';
+  }
+
+  return (
+    msg
+      .replace(/^Firebase:\s*/i, '')
+      .replace(/\(auth\/[^)]+\)\.?/i, '')
+      .trim() || 'Authentication failed.'
+  );
 }
 
 /**
- * Signs up a new user with Name, Email, and Password via Firebase Authentication.
+ * Signs up a new user with real Firebase Authentication methods.
  */
 export async function signUp(name, email, password) {
-  checkFirebaseConfig();
+  if (!auth) {
+    const missing = getFirebaseConfig().missingKeys;
+    throw new Error(
+      missing.length > 0
+        ? `Firebase Authentication is not configured. Missing in frontend/.env: ${missing.join(', ')}`
+        : 'Firebase Authentication is not initialized. Please check your Firebase settings in frontend/.env.'
+    );
+  }
+
   const cleanEmail = email.trim().toLowerCase();
+  try {
+    const userCredential = await createUserWithEmailAndPassword(auth, cleanEmail, password);
+    const firebaseUser = userCredential.user;
 
-  const url = `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${FIREBASE_CONFIG.apiKey}`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      email: cleanEmail,
-      password,
-      returnSecureToken: true,
-    }),
-  });
-
-  const data = await res.json();
-  if (!res.ok) {
-    const msg = data.error?.message || 'Signup failed';
-    throw new Error(formatFirebaseError(msg));
-  }
-
-  // Update displayName if provided
-  let displayName = name ? name.trim() : cleanEmail.split('@')[0];
-  if (name && data.idToken) {
-    try {
-      const updateUrl = `https://identitytoolkit.googleapis.com/v1/accounts:update?key=${FIREBASE_CONFIG.apiKey}`;
-      await fetch(updateUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          idToken: data.idToken,
-          displayName,
-          returnSecureToken: false,
-        }),
-      });
-    } catch {
-      // Non-critical: continue even if displayName update fails
+    if (name && name.trim()) {
+      try {
+        await updateProfile(firebaseUser, { displayName: name.trim() });
+      } catch (profileErr) {
+        console.warn('Could not set displayName:', profileErr);
+      }
     }
+
+    try {
+      cachedIdToken = await firebaseUser.getIdToken();
+    } catch {
+      // ignore
+    }
+
+    return firebaseUser;
+  } catch (err) {
+    throw new Error(formatFirebaseError(err));
   }
-
-  const user = {
-    uid: data.localId,
-    email: data.email,
-    displayName,
-    createdAt: new Date().toISOString(),
-  };
-
-  localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(user));
-  localStorage.setItem(STORAGE_TOKEN_KEY, data.idToken);
-  notifyListeners(user);
-  return user;
 }
 
 /**
- * Signs in an existing user with Email and Password via Firebase Authentication.
+ * Signs in an existing user with real Firebase Authentication methods.
  */
 export async function signIn(email, password) {
-  checkFirebaseConfig();
-  const cleanEmail = email.trim().toLowerCase();
-
-  const url = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${FIREBASE_CONFIG.apiKey}`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      email: cleanEmail,
-      password,
-      returnSecureToken: true,
-    }),
-  });
-
-  const data = await res.json();
-  if (!res.ok) {
-    const msg = data.error?.message || 'Login failed';
-    throw new Error(formatFirebaseError(msg));
+  if (!auth) {
+    const missing = getFirebaseConfig().missingKeys;
+    throw new Error(
+      missing.length > 0
+        ? `Firebase Authentication is not configured. Missing in frontend/.env: ${missing.join(', ')}`
+        : 'Firebase Authentication is not initialized. Please check your Firebase settings in frontend/.env.'
+    );
   }
 
-  const user = {
-    uid: data.localId,
-    email: data.email,
-    displayName: data.displayName || cleanEmail.split('@')[0],
-  };
+  const cleanEmail = email.trim().toLowerCase();
+  try {
+    const userCredential = await signInWithEmailAndPassword(auth, cleanEmail, password);
+    const firebaseUser = userCredential.user;
 
-  localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(user));
-  localStorage.setItem(STORAGE_TOKEN_KEY, data.idToken);
-  notifyListeners(user);
-  return user;
+    try {
+      cachedIdToken = await firebaseUser.getIdToken();
+    } catch {
+      // ignore
+    }
+
+    return firebaseUser;
+  } catch (err) {
+    throw new Error(formatFirebaseError(err));
+  }
 }
 
 /**
- * Signs out the current user and clears session tokens.
+ * Signs out the current user via Firebase Modular SDK.
  */
-export function signOut() {
-  localStorage.removeItem(STORAGE_USER_KEY);
-  localStorage.removeItem(STORAGE_TOKEN_KEY);
-  notifyListeners(null);
+export async function signOut() {
+  cachedIdToken = '';
+  if (auth) {
+    await fbSignOut(auth);
+  }
 }
 
 /**
- * Subscribes to auth state changes.
+ * Subscribes to real Firebase auth state changes.
  */
 export function onAuthStateChanged(callback) {
-  listeners.add(callback);
-  callback(getCurrentUser());
-  return () => listeners.delete(callback);
+  if (!auth) {
+    callback(null);
+    return () => {};
+  }
+
+  return fbOnAuthStateChanged(auth, async (firebaseUser) => {
+    if (firebaseUser) {
+      try {
+        cachedIdToken = await firebaseUser.getIdToken();
+      } catch {
+        cachedIdToken = '';
+      }
+    } else {
+      cachedIdToken = '';
+    }
+    callback(firebaseUser);
+  });
 }
 
-function formatFirebaseError(msg) {
-  if (msg.includes('EMAIL_EXISTS')) return 'An account with this email address already exists.';
-  if (
-    msg.includes('INVALID_LOGIN_CREDENTIALS') ||
-    msg.includes('EMAIL_NOT_FOUND') ||
-    msg.includes('INVALID_PASSWORD')
-  ) {
-    return 'Invalid email or password. Please try again.';
+/**
+ * Gets the current cached Firebase ID token synchronously for API headers.
+ */
+export function getIdToken() {
+  return cachedIdToken;
+}
+
+/**
+ * Refreshes and returns the current Firebase ID token asynchronously.
+ */
+export async function getIdTokenAsync(forceRefresh = false) {
+  if (auth && auth.currentUser) {
+    try {
+      cachedIdToken = await auth.currentUser.getIdToken(forceRefresh);
+      return cachedIdToken;
+    } catch {
+      return '';
+    }
   }
-  if (msg.includes('USER_DISABLED')) return 'This user account has been disabled.';
-  if (msg.includes('TOO_MANY_ATTEMPTS_TRY_LATER')) return 'Too many attempts. Please try again later.';
-  if (msg.includes('WEAK_PASSWORD')) return 'Password should be at least 6 characters.';
-  return msg.replace(/_/g, ' ').toLowerCase();
+  return '';
+}
+
+/**
+ * Returns current Firebase User or null.
+ */
+export function getCurrentUser() {
+  return auth ? auth.currentUser : null;
 }

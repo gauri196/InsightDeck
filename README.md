@@ -129,6 +129,53 @@ npm run dev
 
 ---
 
+## 🚀 GitHub Actions Automated Deployment
+
+InsightDeck includes automated CI/CD workflows under `.github/workflows/`:
+
+### 1. Frontend: GitHub Pages Automated Deployment
+Every push to the `main` branch triggers `.github/workflows/deploy-pages.yml` which:
+1. Installs Node.js dependencies with caching.
+2. Injects Firebase configuration.
+3. Builds the production bundle with SPA fallback (`dist/404.html`).
+4. Deploys the application directly to **GitHub Pages**:
+   - URL: `https://<your-username>.github.io/InsightDeck/`
+
+#### Enabling GitHub Pages in your Repository:
+1. Go to your repository on GitHub: **Settings** -> **Pages**.
+2. Under **Build and deployment** -> **Source**, select **GitHub Actions**.
+3. Push your changes to the `main` branch or trigger manually under the **Actions** tab.
+
+### 2. Backend CI Workflow
+`.github/workflows/backend-ci.yml` automatically validates Python dependencies, FastAPI routing, and presentation modules on every push or pull request.
+
+---
+
+## 🐳 Docker Deployment (Optional)
+
+You can run the entire InsightDeck stack (both Frontend and Backend) using Docker and Docker Compose.
+
+### Quick Start with Docker Compose
+```bash
+docker compose up --build
+```
+- **Frontend**: `http://localhost:5173` (served via high-performance Nginx with SPA routing)
+- **Backend**: `http://localhost:8000` (FastAPI with Uvicorn)
+- **Health Check**: `http://localhost:8000/health`
+
+### Development Mode with Docker (Live Hot-Reloading)
+```bash
+docker compose -f docker-compose.dev.yml up --build
+```
+
+### Stop Containers
+```bash
+docker compose down
+```
+
+---
+
+
 ## 🔒 Security Note
 
 - **Firebase Authentication**: User accounts, passwords, and tokens are managed exclusively by Firebase.

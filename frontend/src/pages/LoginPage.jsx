@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 
 export default function LoginPage({ onNavigateToSignup, onLoginSuccess }) {
-  const { login } = useAuth();
+  const { login, configStatus } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -34,6 +34,15 @@ export default function LoginPage({ onNavigateToSignup, onLoginSuccess }) {
         <div className="auth-brand-badge">INSIGHTDECK</div>
         <h1 className="auth-title">Welcome Back</h1>
         <p className="auth-subtitle">Sign in to access your audit decks and Excel analytics</p>
+
+        {!configStatus?.isConfigured && (
+          <div className="auth-error-banner" role="alert" style={{ background: '#fff3cd', borderColor: '#ffeeba', color: '#856404' }}>
+            <span>
+              ⚙️ <strong>Configuration Notice:</strong> Missing environment variables in <code>frontend/.env</code>:{' '}
+              {configStatus?.missingKeys?.join(', ')}. Please update your .env file and restart Vite.
+            </span>
+          </div>
+        )}
 
         {error && (
           <div className="auth-error-banner" role="alert">
